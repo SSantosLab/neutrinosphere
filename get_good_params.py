@@ -19,6 +19,7 @@ D=1.293 # neutron proton mass difference, MeV
 kconst=9.3e-48 #m^2 / MeV^2
 eng=6.24151e56 #MeV per 10^51 erg/s
 dt=2.5e-6 #time increments of Y_e integration in s
+Ye0=.06 #initial electron fraction determined from cold beta-equilibrium value for neutron stars (Wanajo et al. 2014)
 
 # in MeV - from scaled up Perego+2014 data
 T_neut_disk=4.3
@@ -55,7 +56,7 @@ E_anti_pol=3.1514*T_anti_disk*T_anti_NS*(L_anti_pol)/(L_anti_disk_pol*T_anti_NS 
 E_anti_equ=3.1514*T_anti_disk
 
 # Integrate Y_e for dynamical ejecta
-def get_Ye(vf,t0, Ye0,comp,dt):
+def get_Ye(vf,t0,comp,dt):
     # vf [c], t0 [ms], comp=0 for shock and 1 for tidal, dt [s]
     
     # different components get different luminosities & energies
@@ -108,11 +109,6 @@ def get_Ye(vf,t0, Ye0,comp,dt):
     Ye_answer=Ye_eq-(Ye_eq-Ye0)*(np.e**(-reactions))
     return Ye_answer
 
-#mass fractions for tidal ejecta within 20 degrees of equatorial plane
-shock_opening_ang=70*np.pi/180.
-shock_mass_fraction=.5*((2+np.cos(shock_opening_ang))*(1-np.cos(shock_opening_ang))**2 + (np.sin(shock_opening_ang)**2)*np.cos(shock_opening_ang))
-tidal_mass_fraction=1-shock_mass_fraction
-
 #to go from "transition velocity" to "kinetic velocity"
 velocity_factor=((14/9.)*(1/4. + 1/5. - 1/(50*(10**.5))))**.5
 
@@ -126,29 +122,35 @@ masses=np.unique(lrdata[:,2])
 
 # The one MOSFiT will call over and over:
 # start with very beginning parameters, return parameters which will be used to choose SED (and weights)
-def get_good_params(Mej, vcoast, t0_or_Ye, comp):
+def get_good_params(Mej, vcoast, Ye_or_angle, comp):
     # ejecta mass in solar masses
     # coasting velocity in c (corresponds to Kasen's "transition velocity")
-    # t0 in ms
+    # Ye only if disk wind; otherwise opening polar angle of shock-heated ejecta in degrees
     # comp = 0 for shock-heated, comp = 1 for tidal, comp = 2 for wind
 
     if comp==2: #wind
-        Ye=t0_or_Ye
+        Ye=Ye_or_angle
         entropy=25
         weight=1
+        
     else: #dynamical
+        #mass fractions (or volume fractions, same thing)
+        shock_opening_ang=Ye_or_angle*np.pi/180.
+        shock_mass_fraction=.5*((2+np.cos(shock_opening_ang))*(1-np.cos(shock_opening_ang))**2 + (np.sin(shock_opening_ang)**2)*np.cos(shock_opening_ang))
+
         if comp==0: #shock-heated
             entropy=30
-            Ye0=.1
             weight=shock_mass_fraction
+            Ye=get_Ye(vcoast,2,comp,dt)
+            if Ye==0: #in case integration failed, repeat with smaller timestep
+                Ye=get_Ye(vcoast,2,comp,1.0e-6)
+                
         elif comp==1: #tidal
-            Ye0=.06
             entropy=10
             weight=1-shock_mass_fraction
-            
-        Ye=get_Ye(vcoast,t0_or_Ye,Ye0,comp,dt)
-        if Ye==0: #in case integration failed, repeat with smaller timestep
-            Ye=get_Ye(vcoast,t0_or_Ye,comp,1.0e-6)
+            Ye=get_Ye(vcoast,0,comp,dt)
+            if Ye==0: #in case integration failed, repeat with smaller timestep
+                Ye=get_Ye(vcoast,0,comp,1.0e-6)
     
     Msph=Mej/weight
     v_k=vcoast*velocity_factor
